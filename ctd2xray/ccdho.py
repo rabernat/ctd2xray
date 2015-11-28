@@ -1,0 +1,127 @@
+import numpy as np
+from scipy.interpolate import interp1d
+import functools
+import os
+import xray
+
+def open_ccdho_as_mfdataset(paths, target_pressure,
+                            pressure_coord='pressure',
+                            concat_dim='time'):
+    """Open ccdho hydrographic data in netCDF format, interpolate to
+    specified pressures, and combine as an xray dataset
+    
+    Parameters
+    ----------
+    paths : str or sequence
+        Either a string glob in the form "path/to/my/files/*.nc" or an explicit
+        list of files to open.
+    target_pressure : arraylike
+        Target pressure to which all casts are interpolated
+    pressure_coord : str
+        Name of the coordinate variable for pressure
+    concat_dim : str
+        Name of the dimension along which to concatenate casts
+        
+    Returns
+    -------
+    ds : xray Dataset
+    """
+    
+    # create interpolation function for pressure
+    interpfun = functools.partial(interp_coordinate,
+                interp_coord=pressure_coord, interp_data=target_pressure)
+    # create renaming function for concatenation
+    renamefun = functools.partial(rename_0d_coords, new_dim='time')
+    # compose together
+    ppfun = compose(interpfun, renamefun)
+    #paths = os.path.join(ddir, match_pattern)
+    return xray.open_mfdataset(paths, concat_dim=concat_dim, preprocess=ppfun)
+
+def interp_coordinate(ds,
+        interp_coord, interp_data, drop_original=True,
+        interp_suffix = '_i',
+        interp_kwargs={'bounds_error': False}):
+    """Interpolate xray dataset to a new coordinate using
+    ``scipy.interpolate.interp1d``
+    
+    Paramters
+    ---------
+    interp_coord : str
+        The name of the coordinate along which to perform interpolation
+    interp_data : arraylike
+        New data points to which to interpolate
+    drop_original : bool
+        If ``True``, original coordinate and uninterpolated data variables
+        are dropped from the output dataset
+    interp_suffix : str
+        The suffix to add to interpolated coodinate and variable names
+    interp_kwargs : dict
+        Additional arguments to pass to ``scipy.interpolate.interp1d``
+        
+    Returns
+    -------
+    ds : xray Dataset
+        New dataset with interpolated variables
+    """
+
+    x = ds[interp_coord]
+    xnew_name = x.name + interp_suffix
+
+    for yname in ds.data_vars:
+        y = ds[yname]
+        dims = list(y.dims)
+        if x.name in y.dims:
+            axis = y.get_axis_num(x.name)
+            i = interp1d(x.values, y.values, axis=axis, **interp_kwargs)
+            # set up new dims and coords
+            dims[axis] = xnew_name
+            coords = {}
+            for d in dims:
+                if d==xnew_name:
+                    coords[d] = interp_data
+                else:
+                    coords[d] = y.coords[d]
+
+            ynew = xray.DataArray(i(interp_data), dims=dims, coords=coords)
+            ds[y.name + interp_suffix] = ynew
+            if drop_original:
+                ds = ds.drop(y.name)
+    if drop_original:
+        ds = ds.drop(x.name)
+    return ds
+
+def rename_0d_coords(ds, new_dim):
+    """Assign all zero-dimensional coodinate variables in an xray dataset
+    to be indexed by a different dimension
+    
+    Parameters
+    ----------
+    ds : xray dataset
+        The input dataset
+    new_dim : str
+        The dimension to which to assign all other zero-dimensional coords
+        
+    Returns
+    -------
+    new_ds : xray dataset
+        Output dataset with coordinates reassigned
+    """
+    for d in ds.dims:
+        if (ds[d].ndim==1 and d!=new_dim):
+            if len(ds[d]) == len(ds[new_dim]):
+                #dsnew = ds[d].to_dataset()
+                # create new dataset with only new coordinate
+                dsnew = ds[new_dim].to_dataset()
+                # add new variable
+                dsnew.coords[d] = (new_dim, ds[d].data, ds[d].attrs) 
+                # marge with original dataset
+                ds = ds.update(dsnew)
+                #print dsnew
+    return ds
+
+def compose(*functions):
+    """Utility for composing multiple functions into one.
+    """
+    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
+
+
