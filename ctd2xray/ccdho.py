@@ -3,6 +3,7 @@ from scipy.interpolate import interp1d
 import functools
 import os
 import xray
+import pandas as pd
 
 def open_ccdho_as_mfdataset(paths, target_pressure,
                             pressure_coord='pressure',
@@ -26,14 +27,16 @@ def open_ccdho_as_mfdataset(paths, target_pressure,
     -------
     ds : xray Dataset
     """
-    
+   
+    # add time if missing
+    timefun = _maybe_add_time_coord
     # create interpolation function for pressure
     interpfun = functools.partial(interp_coordinate,
                 interp_coord=pressure_coord, interp_data=target_pressure)
     # create renaming function for concatenation
-    renamefun = functools.partial(rename_0d_coords, new_dim='time')
+    renamefun = functools.partial(rename_0d_coords, new_dim=concat_dim)
     # compose together
-    ppfun = compose(interpfun, renamefun)
+    ppfun = compose(interpfun, renamefun, timefun)
     #paths = os.path.join(ddir, match_pattern)
     return xray.open_mfdataset(paths, concat_dim=concat_dim, preprocess=ppfun)
 
@@ -117,6 +120,42 @@ def rename_0d_coords(ds, new_dim):
                 # marge with original dataset
                 ds = ds.update(dsnew)
                 #print dsnew
+    return ds
+
+def _maybe_add_time_coord(ds, attr_name='Cast_start_UTC', coord_name='time',
+                          get_dim_from='station'):
+    if coord_name in ds.dims:
+        return ds
+    else:
+        newdims = ds[get_dim_from].dims
+        assert len(newdims)==1
+        return attribute_to_time_variable(ds, attr_name,
+                variable_name=coord_name, variable_dim=newdims[0])
+
+def attribute_to_time_variable(ds, attr_name,
+                variable_name='time', variable_dim='time'):
+    """Turn an attribute into a time coordinate.
+
+    Parameters
+    ----------
+    ds : xray dataset
+    attr_name : str
+        The dataset attribute to parse for time
+    variable_name : str
+        The new variable name for the time data
+    variable_dim : str
+        The dimension to use for the time data
+
+    Returns
+    -------
+    ds_new : xray dataset
+    """
+    time = np.array([pd.to_datetime(ds.attrs[attr_name], utc=True)])
+    if variable_dim==variable_name:
+        da = xray.DataArray(time, dims=[coord_name])
+    else:
+        da = xray.DataArray(time, coords={variable_dim:ds[variable_dim]})
+    ds[variable_name] = da
     return ds
 
 def compose(*functions):
