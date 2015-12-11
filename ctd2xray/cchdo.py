@@ -5,10 +5,10 @@ import os
 import xray
 import pandas as pd
 
-def open_ccdho_as_mfdataset(paths, target_pressure,
+def open_cchdo_as_mfdataset(paths, target_pressure,
                             pressure_coord='pressure',
                             concat_dim='time'):
-    """Open ccdho hydrographic data in netCDF format, interpolate to
+    """Open cchdo hydrographic data in netCDF format, interpolate to
     specified pressures, and combine as an xray dataset
     
     Parameters
