@@ -2,14 +2,14 @@ import numpy as np
 from scipy.interpolate import interp1d
 import functools
 import os
-import xray
+import xarray as xr
 import pandas as pd
 
 def open_cchdo_as_mfdataset(paths, target_pressure,
                             pressure_coord='pressure',
                             concat_dim='time'):
     """Open cchdo hydrographic data in netCDF format, interpolate to
-    specified pressures, and combine as an xray dataset
+    specified pressures, and combine as an xarray dataset
     
     Parameters
     ----------
@@ -25,7 +25,7 @@ def open_cchdo_as_mfdataset(paths, target_pressure,
         
     Returns
     -------
-    ds : xray Dataset
+    ds : xarray Dataset
     """
    
     # add time if missing
@@ -38,13 +38,13 @@ def open_cchdo_as_mfdataset(paths, target_pressure,
     # compose together
     ppfun = compose(interpfun, renamefun, timefun)
     #paths = os.path.join(ddir, match_pattern)
-    return xray.open_mfdataset(paths, concat_dim=concat_dim, preprocess=ppfun)
+    return xr.open_mfdataset(paths, concat_dim=concat_dim, preprocess=ppfun)
 
 def interp_coordinate(ds,
         interp_coord, interp_data, drop_original=True,
         interp_suffix = '_i',
         interp_kwargs={'bounds_error': False}):
-    """Interpolate xray dataset to a new coordinate using
+    """Interpolate xarray dataset to a new coordinate using
     ``scipy.interpolate.interp1d``
     
     Paramters
@@ -63,7 +63,7 @@ def interp_coordinate(ds,
         
     Returns
     -------
-    ds : xray Dataset
+    ds : xarray Dataset
         New dataset with interpolated variables
     """
 
@@ -85,7 +85,7 @@ def interp_coordinate(ds,
                 else:
                     coords[d] = y.coords[d]
 
-            ynew = xray.DataArray(i(interp_data), dims=dims, coords=coords)
+            ynew = xr.DataArray(i(interp_data), dims=dims, coords=coords)
             ds[y.name + interp_suffix] = ynew
             if drop_original:
                 ds = ds.drop(y.name)
@@ -94,32 +94,33 @@ def interp_coordinate(ds,
     return ds
 
 def rename_0d_coords(ds, new_dim):
-    """Assign all zero-dimensional coodinate variables in an xray dataset
+    """Assign all zero-dimensional coodinate variables in an xarray dataset
     to be indexed by a different dimension
     
     Parameters
     ----------
-    ds : xray dataset
+    ds : xarray dataset
         The input dataset
     new_dim : str
         The dimension to which to assign all other zero-dimensional coords
         
     Returns
     -------
-    new_ds : xray dataset
+    new_ds : xarray dataset
         Output dataset with coordinates reassigned
     """
     for d in ds.dims:
         if (ds[d].ndim==1 and d!=new_dim):
             if len(ds[d]) == len(ds[new_dim]):
-                #dsnew = ds[d].to_dataset()
                 # create new dataset with only new coordinate
-                dsnew = ds[new_dim].to_dataset()
-                # add new variable
-                dsnew.coords[d] = (new_dim, ds[d].data, ds[d].attrs) 
-                # marge with original dataset
+                oldvar = ds[d]
+                newvar = xr.DataArray(oldvar,
+                            coords={new_dim: ds[new_dim].values},
+                            dims=[new_dim,],
+                            attrs=oldvar.attrs,
+                            name=d)
+                dsnew = newvar.to_dataset()
                 ds = ds.update(dsnew)
-                #print dsnew
     return ds
 
 def _maybe_add_time_coord(ds, attr_name='Cast_start_UTC', coord_name='time',
@@ -138,7 +139,7 @@ def attribute_to_time_variable(ds, attr_name,
 
     Parameters
     ----------
-    ds : xray dataset
+    ds : xarray dataset
     attr_name : str
         The dataset attribute to parse for time
     variable_name : str
@@ -148,13 +149,13 @@ def attribute_to_time_variable(ds, attr_name,
 
     Returns
     -------
-    ds_new : xray dataset
+    ds_new : xarray dataset
     """
     time = np.array([pd.to_datetime(ds.attrs[attr_name], utc=True)])
     if variable_dim==variable_name:
-        da = xray.DataArray(time, dims=[coord_name])
+        da = xr.DataArray(time, dims=[coord_name])
     else:
-        da = xray.DataArray(time, coords={variable_dim:ds[variable_dim]})
+        da = xr.DataArray(time, coords={variable_dim:ds[variable_dim]})
     ds[variable_name] = da
     return ds
 
