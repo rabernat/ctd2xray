@@ -119,7 +119,7 @@ def rename_0d_coords(ds, new_dim):
                             dims=[new_dim,],
                             attrs=oldvar.attrs,
                             name=d)
-                dsnew = newvar.to_dataset()
+                dsnew = newvar.to_dataset().set_coords(d)
                 ds = ds.update(dsnew)
     return ds
 
